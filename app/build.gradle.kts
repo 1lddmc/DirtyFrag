@@ -10,8 +10,8 @@ android {
         applicationId = "df.root"
         minSdk = 32
         targetSdk = 37
-        versionCode = 31
-        versionName = "1.11"
+        versionCode = 32
+        versionName = "1.15"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -61,6 +61,9 @@ androidComponents {
 
     buildFeatures {
         viewBinding = true
+        // The toolbar version pill reads BuildConfig.VERSION_NAME, so the pill
+        // can never fall behind versionName again.
+        buildConfig = true
     }
 
     externalNativeBuild {

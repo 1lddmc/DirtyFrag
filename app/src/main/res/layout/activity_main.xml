@@ -51,22 +51,36 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/appBarLayout" />
 
-    <!-- SU Manager picker. Upstream 3.2 removed the bundled ksud binary and
-         stages it from the selected manager's nativeLibraryDir, so the exploit
-         cannot run at all until a manager is picked here. -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/cardSuManager"
+    <!-- Movable card stack (VIS1): the four OneUI cards live in a vertical
+         CardStackLayout. A tap is just a tap; hold anywhere on a card for a beat
+         and it lifts, snaps under the finger and sticks there until the finger
+         is lifted. The order and any hidden card are kept in dfroot_ui prefs.
+         The stack is wrap_content so the log below it still rides along with
+         whatever the cards add up to. -->
+    <df.root.CardStackLayout
+        android:id="@+id/cardStack"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
         android:layout_marginTop="8dp"
-        app:cardBackgroundColor="#FF1C1C1C"
-        app:cardCornerRadius="26dp"
-        app:strokeWidth="0dp"
+        android:layout_marginEnd="16dp"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:orientation="vertical"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/appBarLayout">
+
+    <!-- SU Manager picker. Upstream 3.2 removed the bundled ksud binary and
+         stages it from the selected manager's nativeLibraryDir, so the exploit
+         cannot run at all until a manager is picked here. -->
+    <df.root.DraggableCardView
+        android:id="@+id/cardSuManager"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="#FF1C1C1C"
+        app:cardCornerRadius="26dp"
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:id="@+id/rowSuManager"
@@ -117,21 +131,16 @@
 
         </LinearLayout>
 
-    </com.google.android.material.card.MaterialCardView>
+    </df.root.DraggableCardView>
 
-    <com.google.android.material.card.MaterialCardView
+    <df.root.DraggableCardView
         android:id="@+id/cardBoot"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
         android:layout_marginTop="12dp"
         app:cardBackgroundColor="#FF1C1C1C"
         app:cardCornerRadius="26dp"
-        app:strokeWidth="0dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/cardSuManager">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -224,21 +233,16 @@
 
         </LinearLayout>
 
-    </com.google.android.material.card.MaterialCardView>
+    </df.root.DraggableCardView>
 
-    <com.google.android.material.card.MaterialCardView
+    <df.root.DraggableCardView
         android:id="@+id/cardModules"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
         android:layout_marginTop="12dp"
         app:cardBackgroundColor="#FF1C1C1C"
         app:cardCornerRadius="26dp"
-        app:strokeWidth="0dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/cardBoot">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -284,21 +288,16 @@
 
         </LinearLayout>
 
-    </com.google.android.material.card.MaterialCardView>
+    </df.root.DraggableCardView>
 
-    <com.google.android.material.card.MaterialCardView
+    <df.root.DraggableCardView
         android:id="@+id/cardLog"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
         android:layout_marginTop="12dp"
         app:cardBackgroundColor="#FF1C1C1C"
         app:cardCornerRadius="26dp"
-        app:strokeWidth="0dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/cardModules">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -342,45 +341,67 @@
 
         </LinearLayout>
 
-    </com.google.android.material.card.MaterialCardView>
+    </df.root.DraggableCardView>
 
-    <ScrollView
-        android:id="@+id/outputScroll"
+    </df.root.CardStackLayout>
+
+    <!-- The advanced log. CardStackLayout owns this box (VIS4): it keeps a window
+         of @dimen/log_window_height under the "Show advanced log" card and cuts
+         the box to exactly that window with a top margin, so the log is exactly as
+         tall as the room it was given and can never run under a card further down
+         the stack - which is what used to slice the text in half along the card
+         edges. The margin is set on a layout pass, never with a translation: a
+         translated view leaves the strip it already drew sitting on the screen
+         under the cards. The padding used to be 140dp to keep the last lines clear
+         of the pills the log scrolled beneath; the box is bounded now, so it only
+         needs a small inset.
+
+         The text and the fade are ONE box rather than two views that happen to
+         agree. Kept apart, each was placed on its own and faded on its own, and
+         the fade was reliably a step behind the text it is meant to be lying on -
+         the log flashed up whole and the gradient arrived after it. In one box the
+         gradient is simply the top of it: same place, same height, same alpha,
+         same frame. -->
+    <FrameLayout
+        android:id="@+id/logWindow"
         android:layout_width="0dp"
-        android:layout_height="0dp"
+        android:layout_height="@dimen/log_window_height"
         android:layout_marginStart="32dp"
         android:layout_marginEnd="32dp"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="16dp"
-        android:scrollbars="none"
-        android:overScrollMode="never"
-        android:clipToPadding="false"
-        android:paddingBottom="140dp"
-        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/cardLog">
+        app:layout_constraintTop_toTopOf="parent">
 
-        <TextView
-            android:id="@+id/outputView"
+        <ScrollView
+            android:id="@+id/outputScroll"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#FFB3B3B3"
-            android:textIsSelectable="false"
-            android:textSize="11sp" />
+            android:layout_height="match_parent"
+            android:scrollbars="none"
+            android:overScrollMode="never"
+            android:clipToPadding="false"
+            android:paddingBottom="8dp">
 
-    </ScrollView>
+            <TextView
+                android:id="@+id/outputView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFB3B3B3"
+                android:textIsSelectable="false"
+                android:textSize="11sp" />
 
-    <!-- OneUI-style bottom fade over the log -->
-    <df.root.BottomFadeView
-        android:id="@+id/bottomFade"
-        android:layout_width="0dp"
-        android:layout_height="400dp"
-        android:clickable="false"
-        android:focusable="false"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        </ScrollView>
+
+        <!-- OneUI-style fade over the log box. Not clickable, so a press that
+             lands on it carries on through to the text underneath: the bottom of
+             the log is covered in gradient, and still has to scroll. -->
+        <df.root.BottomFadeView
+            android:id="@+id/bottomFade"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clickable="false"
+            android:focusable="false" />
+
+    </FrameLayout>
 
     <!-- OneUI-update-style two-step progress bar -->
     <df.root.TwoStepProgressView

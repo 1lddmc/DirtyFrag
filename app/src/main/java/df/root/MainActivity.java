@@ -79,6 +79,34 @@ public class MainActivity extends AppCompatActivity implements IReporter {
     /** Raw "***FAILED***: ..." text from the exploit, used for the failure log. */
     private String lastFailReason;
 
+    // ---- Movable card stack (VIS1 - VIS5) -----------------------------------
+
+    /** The card keys as they are written to dfroot_ui, in the shipped order.
+     *  "sumanager" is first and is the one card that can never be hidden. */
+    private static final String[] CARD_KEYS = {"sumanager", "autorun", "modules", "log"};
+    /** Hide button per card, index-parallel to CARD_KEYS. They live in the root
+     *  layout, not inside the cards: MaterialCardView clips its children to the
+     *  rounded outline, and the badge has to straddle the card's top-left edge. */
+    private final android.widget.ImageButton[] hideButtons =
+            new android.widget.ImageButton[CARD_KEYS.length];
+    /** Cards the user hid; kept in sync with the prefs so a restart is faithful. */
+    private final List<String> hiddenCards = new ArrayList<>();
+    /** True while a drag has the scrollable log blacked out (VIS2.1). */
+    private boolean logHiddenForDrag;
+    /** True while the log is allowed on screen at all: the advanced-log switch
+     *  is on, there is a run to show and the advanced-log card is not collapsed.
+     *  Composed with {@link #logHiddenForDrag} into one fade (VIS2.1/VIS4). */
+    private boolean logAllowed;
+    /** How long the log and its gradient take to ease in or away. */
+    private static final long LOG_FADE_MS = 180L;
+    /** Hide button geometry: a 30dp badge sitting on the card's top edge. */
+    private static final float HIDE_BTN_DP = 30f;
+    /** Invisible full-screen sheet that turns the next tap into "accept this
+     *  layout" while a card is still outlined. It has to be a real view: the
+     *  log scroll and the pills eat their own touches, so a listener on the
+     *  root layout would never hear the tap. */
+    private View acceptOverlay;
+
     @Override
     public void report(String msg) {
         Log.i(TAG, msg.trim());
@@ -217,6 +245,28 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         binding.twoStep.setSeg2(p, label, color);
     }
 
+    /** VIS4: the room the stack keeps under the advanced-log card, which is also
+     *  exactly how tall the log panel and its fade are - one number in
+     *  @dimen/log_window_height, so the window and the box can never disagree. */
+    private int logWindowPx() {
+        return getResources().getDimensionPixelSize(R.dimen.log_window_height);
+    }
+
+    /** Turn the advanced log on or off from anywhere - the switch, a card being
+     *  lifted, the saved setting at startup.
+     *  OneUiSwitch is drawn from scratch and only reports a change when a finger
+     *  clicks it: quietly calling setChecked() moves the thumb and tells nobody,
+     *  which left the pill showing off while the log went on behaving as if it
+     *  were still on. Everything therefore comes through here. */
+    private void setAdvancedLog(boolean on) {
+        advancedLog = on;
+        binding.switchAdvancedLog.setChecked(on);
+        createDeviceProtectedStorageContext()
+                .getSharedPreferences("dfroot", MODE_PRIVATE)
+                .edit().putBoolean("advanced_log", on).apply();
+        updateLogVisibility();
+    }
+
     /** Visibility of log / share button / progress bar, composed from the
      *  advanced-log setting and whether any run data exists. The log block
      *  needs the switch; the share circle does not - a finished run can always
@@ -224,13 +274,55 @@ public class MainActivity extends AppCompatActivity implements IReporter {
     private void updateLogVisibility() {
         boolean hasRun = logBuffer.length() > 0
                 || (lastLogFile != null && lastLogFile.exists());
-        boolean showLog = advancedLog && hasRun;
-        binding.outputScroll.setVisibility(showLog ? View.VISIBLE : View.GONE);
+        // The log lives under its own card, so a collapsed card takes the log
+        // with it - "Reset layout" brings both back.
+        logAllowed = advancedLog && hasRun && !hiddenCards.contains("log");
+        // VIS4: the log hangs off the advanced-log card, so the window the stack
+        // keeps for it follows the log. The stack then does the placing - the
+        // panel and its fade are handed over in setupCardStack().
+        // The window is cut before the log fades up, so the panel and its
+        // gradient are already lying in the right place when they appear: show
+        // the log first and slide the gradient in behind it, and the log reads
+        // as one bright flash before the fade catches up with it.
+        // The window exists for exactly as long as the log is on screen and for
+        // no longer - a drag included. Lifting a card puts the log away
+        // (VIS2.1), and the room it kept has to go with it: held open, every
+        // card below the one being moved sat a whole window too low and slid
+        // that much further than it ever should, which is what made a reorder
+        // look like the cards underneath were dropping out of the screen. The
+        // stack re-lays itself out the moment the window changes, so the drag
+        // that is starting measures the slots the cards actually have.
+        binding.cardStack.setLogGap(logAllowed ? logWindowPx() : 0);
+        fadeLog(logAllowed && !logHiddenForDrag);
         // Share circle: any FINISHED run, advanced log on or off. Still hidden
         // while a run is in flight (the log is being written) and shown for a
         // saved log from a previous boot, which is finished by definition.
         setShareButtonVisible(hasRun && !running);
         // Progress bar is the simple status: always visible.
+    }
+
+    /**
+     * Ease the log box in or away (VIS2.1, VIS4). The log has half a dozen
+     * reasons to appear or vanish - the switch, a run starting, a card being
+     * lifted, that card being collapsed - and every one of them used to flip the
+     * views between GONE and VISIBLE like a light switch, which read as a flash.
+     * It now moves on one alpha, and a log that is fading out only leaves the
+     * layout once there is nothing left of it to see.
+     * One alpha for one box: the text and the gradient over it are the same view
+     * since VIS4, so there is nothing left that could fall a frame behind.
+     */
+    private void fadeLog(boolean show) {
+        final View box = binding.logWindow;
+        boolean visible = box.getVisibility() == View.VISIBLE;
+        float target = show ? 1f : 0f;
+        if (visible == show && box.getAlpha() == target) return;
+        box.animate().cancel();
+        if (show) box.setVisibility(View.VISIBLE);
+        box.animate().alpha(target).setDuration(LOG_FADE_MS)
+                .withEndAction(() -> {
+                    if (box.getAlpha() <= 0f) box.setVisibility(View.GONE);
+                })
+                .start();
     }
 
     /** Pop the share circle in/out with the same animation the KernelSU
@@ -345,10 +437,13 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        // Version tag flowing right after the header title.
-        SpannableString title = new SpannableString("DirtyFrag 1.11");
+        // Version tag flowing right after the header title. Straight out of
+        // versionName, so the pill, the update check (which reads the installed
+        // package info) and the APK itself can never disagree.
+        String head = "DirtyFrag " + BuildConfig.VERSION_NAME;
+        SpannableString title = new SpannableString(head);
         pillSpan = new VersionPillSpan(0.45f);
-        title.setSpan(pillSpan, 10, title.length(),
+        title.setSpan(pillSpan, "DirtyFrag ".length(), head.length(),
                 SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
         binding.toolbar.setTitle(title);
         // NOTE: no setSupportActionBar() - it makes the ActionBar delegate draw
@@ -446,13 +541,8 @@ public class MainActivity extends AppCompatActivity implements IReporter {
                 .getSharedPreferences("dfroot", MODE_PRIVATE)
                 .getBoolean("advanced_log", false);
         binding.switchAdvancedLog.setChecked(advancedLog);
-        binding.switchAdvancedLog.setOnCheckedChangeListener((btn, checked) -> {
-            advancedLog = checked;
-            createDeviceProtectedStorageContext()
-                    .getSharedPreferences("dfroot", MODE_PRIVATE)
-                    .edit().putBoolean("advanced_log", checked).apply();
-            updateLogVisibility();
-        });
+        binding.switchAdvancedLog.setOnCheckedChangeListener(
+                (btn, checked) -> setAdvancedLog(checked));
         updateLogVisibility();
 
         // Restore the simple status for the current state: rooted device or a
@@ -588,60 +678,24 @@ public class MainActivity extends AppCompatActivity implements IReporter {
             box.addView(exRow, new android.widget.LinearLayout.LayoutParams(
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT, (int) (46 * md)));
 
-            // -- Remove KSU/KSUD row: 3-tap confirm, greyed out until a manager
-            //    is picked. Pre-3.2 this hardcoded me.weishu.kernelsu; it now
-            //    targets whichever manager is actually selected. --
-            final boolean haveManager = suManagerPkg != null;
-            android.widget.LinearLayout rmCol = new android.widget.LinearLayout(this);
-            rmCol.setOrientation(android.widget.LinearLayout.VERTICAL);
-            rmCol.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
-            rmCol.setPadding((int) (20 * md), 0, (int) (20 * md), 0);
-            TextView rmTitle = new TextView(this);
-            rmCol.setBackgroundResource(R.drawable.menu_row_highlight);
-            rmTitle.setText("Remove KSU/KSUD");
-            rmTitle.setGravity(android.view.Gravity.START);
-            rmTitle.setTextColor(haveManager ? 0xFFE8E8E8 : 0xFF6E6E6E);
-            rmTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
-            rmCol.addView(rmTitle);
-            TextView rmSub = new TextView(this);
-            rmSub.setText(haveManager ? "Click 3 times" : "No SU manager selected");
-            rmSub.setGravity(android.view.Gravity.START);
-            rmSub.setTextColor(haveManager ? 0xFF8E8E8E : 0xFF5A5A5A);
-            rmSub.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11);
-            rmCol.addView(rmSub);
-            final int[] taps = {0};
-            rmCol.setOnClickListener(v2 -> {
-                if (!haveManager) return;
+            // -- Reset layout row (VIS5): this slot used to hold "Remove
+            //    KSU/KSUD", which never did anything useful. It now puts the
+            //    cards back in the shipped order and brings back every card the
+            //    user hid. --
+            TextView rlRow = new TextView(this);
+            rlRow.setBackgroundResource(R.drawable.menu_row_highlight);
+            rlRow.setText("Reset layout");
+            rlRow.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
+            rlRow.setPadding((int) (20 * md), 0, 0, 0);
+            rlRow.setTextColor(0xFFE8E8E8);
+            rlRow.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+            rlRow.setOnClickListener(v2 -> {
                 v2.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-                taps[0]++;
-                if (taps[0] == 1) {
-                    rmTitle.setText("Are you sure");
-                    rmSub.setText("Click 2 times");
-                    return;
-                }
-                if (taps[0] == 2) {
-                    rmTitle.setText("One more click");
-                    rmSub.setText("Click 1 time");
-                    return;
-                }
                 if (pwRef[0] != null) pwRef[0].dismiss();
-                // Deliberately NOT calling `ksud uninstall`: its upstream
-                // implementation force-flashes a stored boot image when a backup
-                // exists and reboots the device after 5 seconds - surprises we
-                // don't want. DirtyFrag's kernel side is a page-cache patch that
-                // a plain reboot clears, so removing the manager app is the job.
-                try {
-                    Intent un = new Intent(Intent.ACTION_DELETE,
-                            Uri.fromParts("package", suManagerPkg, null));
-                    un.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(un);
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this,
-                            "Uninstall prompt unavailable", Toast.LENGTH_SHORT).show();
-                }
+                resetCardLayout();
             });
-            box.addView(rmCol, new android.widget.LinearLayout.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT, (int) (58 * md)));
+            box.addView(rlRow, new android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT, (int) (46 * md)));
 
             // Width: content, but at least 210dp so the popup reads properly.
             box.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
@@ -729,6 +783,11 @@ public class MainActivity extends AppCompatActivity implements IReporter {
                 .getBoolean("expert_mode", false);
         applyExpertMode();
 
+        // Movable card stack (VIS1 - VIS5): hold-to-lift reorder with the card
+        // stuck to the finger, the per-card hide badge and the order + hidden
+        // flags from dfroot_ui.
+        setupCardStack();
+
         // Run stays locked until an SU manager is selected (and, after a failed
         // run, until the device has been rebooted).
         updateRunButton();
@@ -747,6 +806,296 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         binding.switchBootStart.setEnabled(ok);
         binding.switchAutoSoftReboot.setEnabled(ok
                 && binding.switchBootStart.isChecked());
+    }
+
+    // ---- Movable card stack (VIS1 - VIS5) -----------------------------------
+
+    /** The stack card a prefs key refers to. */
+    private DraggableCardView cardForKey(String key) {
+        if (key == null) return null;
+        switch (key) {
+            case "sumanager": return binding.cardSuManager;
+            case "autorun": return binding.cardBoot;
+            case "modules": return binding.cardModules;
+            case "log": return binding.cardLog;
+            default: return null;
+        }
+    }
+
+    /** The prefs key of a stack card, or null if it is not one of them. */
+    private String keyForCard(View card) {
+        for (String key : CARD_KEYS) {
+            if (cardForKey(key) == card) return key;
+        }
+        return null;
+    }
+
+    /**
+     * Wires the movable stack (VIS1): the hide badges, the order and hidden
+     * flags the user left behind on last exit, and the tap-outside-to-accept
+     * gesture. Nothing here changes what a card DOES - the toggles, the manager
+     * picker and the autorun component are wired where they always were, only
+     * the position of their card in the stack moves (RULES 4).
+     */
+    private void setupCardStack() {
+        final CardStackLayout stack = binding.cardStack;
+        // Above the log scroll and the pills (0dp), below the accept sheet
+        // (5dp) and the hide badges (26dp): the stack keeps first pick of every
+        // touch, the sheet catches the rest, the badge floats over both.
+        stack.setElevation(10 * getResources().getDisplayMetrics().density);
+        // VIS4: the log panel belongs to the advanced-log card. The stack keeps a
+        // window of room under that card for the log to show through and slides
+        // the panel and its fade into it - the stack owns the geometry, so a
+        // settle, a collapse or a reorder can never leave the log somewhere else.
+        stack.setLogCard(binding.cardLog);
+        stack.setLogWindow(binding.logWindow);
+        stack.setLogGap(logAllowed ? logWindowPx() : 0);
+        stack.setListener(new CardStackLayout.Listener() {
+            @Override
+            public void onCardLifted(View card) {
+                // VIS4: the log belongs to a card, and lifting that card means it
+                // may end up somewhere else - with the log trailing after it.
+                // Chasing the window across a stack in motion is what kept
+                // leaving the panel and its gradient a layout behind, so picking
+                // a card up now puts the advanced log away. The thumb flips off
+                // while the card is still in the hand, and the log is turned back
+                // on once the card is where it belongs.
+                if (advancedLog) setAdvancedLog(false);
+                setLogHiddenForDrag(true);
+                setAcceptOverlay(false);
+                showHideButton(card);
+                // Closing the window takes the cards under the log card - this one
+                // included - straight back up again, and the card then snaps down
+                // under the finger. Keep the chip glued through both of those
+                // rather than leaving it where the card was before the layout
+                // moved it; onCardMoved takes over from the next drag frame.
+                followBadgeDuringSettle(card);
+            }
+
+            @Override
+            public void onCardMoved(View card) {
+                placeHideButton(card);
+            }
+
+            @Override
+            public void onCardDropped(View card, boolean moved) {
+                setLogHiddenForDrag(false);
+                setAcceptOverlay(true);
+                placeHideButton(card);
+                followBadgeDuringSettle(card);
+                if (moved) saveCardLayout();
+            }
+
+            @Override
+            public void onCardSelectionCleared() {
+                setAcceptOverlay(false);
+                hideAllHideButtons();
+            }
+        });
+
+        final float md = getResources().getDisplayMetrics().density;
+        for (int i = 0; i < CARD_KEYS.length; i++) {
+            final DraggableCardView card = cardForKey(CARD_KEYS[i]);
+            // RULES 3: the SU Manager card moves but can never be hidden.
+            card.setHideable(!"sumanager".equals(CARD_KEYS[i]));
+            android.widget.ImageButton b = new android.widget.ImageButton(this);
+            b.setBackgroundResource(R.drawable.bg_card_hide_button);
+            b.setImageResource(R.drawable.ic_card_hide);
+            b.setImageTintList(ColorStateList.valueOf(0xFF3A3A3C));
+            b.setScaleType(android.widget.ImageView.ScaleType.CENTER);
+            b.setPadding(0, 0, 0, 0);
+            b.setContentDescription("Hide card");
+            // Above the lifted card (18dp), below the menu dim layer (30dp).
+            b.setElevation(26 * md);
+            b.setVisibility(View.GONE);
+            b.setOnClickListener(v -> {
+                v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                hideCard(card);
+            });
+            int size = (int) (HIDE_BTN_DP * md);
+            androidx.constraintlayout.widget.ConstraintLayout.LayoutParams lp =
+                    new androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
+                            size, size);
+            binding.getRoot().addView(b, lp);
+            hideButtons[i] = b;
+        }
+
+        // Saved order first, then the hidden flags: a hidden card keeps its
+        // slot in the stack, so showing it again puts it back where it was.
+        List<View> seq = new ArrayList<>();
+        for (String key : CardLayoutStore.loadOrder(mDeCtx, CARD_KEYS)) {
+            DraggableCardView c = cardForKey(key);
+            if (c != null && !seq.contains(c)) seq.add(c);
+        }
+        stack.applyOrder(seq);
+        hiddenCards.addAll(CardLayoutStore.loadHidden(mDeCtx, CARD_KEYS));
+        for (String key : hiddenCards) {
+            DraggableCardView c = cardForKey(key);
+            if (c != null && c.isHideable()) c.setVisibility(View.GONE);
+        }
+        // Whichever card ends up on top must sit flush, so the 12dp gaps are
+        // handed out again now that the hidden ones are out of the way.
+        stack.applyOrder(seq);
+        // The hidden flags arrive after the log was last composed, and a
+        // collapsed advanced-log card takes the log with it (VIS4).
+        updateLogVisibility();
+
+        // The accept sheet: full screen, invisible, under the stack (10dp) but
+        // above the log scroll and the pills, so a tap anywhere that is not a
+        // card accepts the layout (VIS2.2). It has to be a real view: the log
+        // scroll and the pills consume their own touches, so a listener on the
+        // root layout would never hear the tap.
+        androidx.constraintlayout.widget.ConstraintLayout.LayoutParams alp =
+                new androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0, 0);
+        alp.leftToLeft = alp.rightToRight =
+                androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID;
+        alp.topToTop = alp.bottomToBottom =
+                androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID;
+        acceptOverlay = new View(this);
+        acceptOverlay.setClickable(true);
+        acceptOverlay.setElevation(5 * md);
+        acceptOverlay.setVisibility(View.GONE);
+        acceptOverlay.setOnClickListener(v -> stack.clearSelection());
+        binding.getRoot().addView(acceptOverlay, alp);
+    }
+
+    /** The accept sheet is up only while a card still carries the outline. */
+    private void setAcceptOverlay(boolean on) {
+        if (acceptOverlay != null) {
+            acceptOverlay.setVisibility(on ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /** The badge that belongs to a stack card, or null. */
+    private android.widget.ImageButton hideButtonFor(View card) {
+        String key = keyForCard(card);
+        if (key == null) return null;
+        for (int i = 0; i < CARD_KEYS.length; i++) {
+            if (CARD_KEYS[i].equals(key)) return hideButtons[i];
+        }
+        return null;
+    }
+
+    /** Show the badge of the lifted card only (VIS1.4). */
+    private void showHideButton(View card) {
+        hideAllHideButtons();
+        android.widget.ImageButton b = hideButtonFor(card);
+        if (b == null || !(card instanceof DraggableCardView)
+                || !((DraggableCardView) card).isHideable()) {
+            return;
+        }
+        b.setVisibility(View.VISIBLE);
+        placeHideButton(card);
+    }
+
+    private void hideAllHideButtons() {
+        for (android.widget.ImageButton b : hideButtons) {
+            if (b != null) b.setVisibility(View.GONE);
+        }
+        binding.cardStack.clearKeepTouchArea();
+    }
+
+    /**
+     * Glue the badge to the card's top edge, following it while dragged. Its
+     * centre is put on the LEFT edge of the card - the leftmost point of the
+     * outlined top edge - so the chip straddles the outline in both directions:
+     * half over the card and half over the side margin, half above the card and
+     * half below. It is no longer parked a corner radius in from the left, which
+     * left it floating over the card instead of on its edge (VIS1.4). The chip is
+     * 30dp and the stack is inset 16dp, so the overhang stops 1dp shy of the
+     * screen edge and nothing is cut off.
+     */
+    private void placeHideButton(View card) {
+        android.widget.ImageButton b = hideButtonFor(card);
+        if (b == null || b.getVisibility() != View.VISIBLE) return;
+        float md = getResources().getDisplayMetrics().density;
+        int size = b.getWidth() > 0 ? b.getWidth() : Math.round(HIDE_BTN_DP * md);
+        int[] at = new int[2];
+        int[] root = new int[2];
+        card.getLocationInWindow(at);
+        binding.getRoot().getLocationInWindow(root);
+        float bx = at[0] - root[0] - size / 2f;
+        float by = at[1] - root[1] - size / 2f;
+        b.setX(bx);
+        b.setY(by);
+        // ... and tell the stack to let the badge's own taps through.
+        CardStackLayout stack = binding.cardStack;
+        stack.setKeepTouchArea(bx - stack.getX(), by - stack.getY(),
+                bx + size - stack.getX(), by + size - stack.getY());
+    }
+
+    /** The badge keeps following the card while it settles into its new slot. */
+    private void followBadgeDuringSettle(final View card) {
+        binding.cardStack.postDelayed(new Runnable() {
+            private int ticks = 16;
+
+            @Override
+            public void run() {
+                placeHideButton(card);
+                if (--ticks > 0) binding.cardStack.postDelayed(this, 16);
+            }
+        }, 16);
+    }
+
+    /** VIS1.4: collapse a card out of the stack for good. The SU Manager card
+     *  refuses to be hidden (RULES 3); "Reset layout" brings the rest back. */
+    private void hideCard(DraggableCardView card) {
+        String key = keyForCard(card);
+        if (key == null || !card.isHideable() || hiddenCards.contains(key)) return;
+        hiddenCards.add(key);
+        // VIS4: collapsing the advanced-log card takes the log with it.
+        updateLogVisibility();
+        binding.cardStack.clearSelection();
+        hideAllHideButtons();
+        binding.cardStack.hideCard(card);
+        // VIS4: the log follows the advanced-log card, so a collapse anywhere in
+        // the stack moves it - but the stack re-reads the window before every
+        // frame, so there is nothing left to re-glue here.
+        saveCardLayout();
+    }
+
+    /** VIS5: back to the shipped order with every card showing again. */
+    private void resetCardLayout() {
+        CardStackLayout stack = binding.cardStack;
+        stack.clearSelection();
+        hideAllHideButtons();
+        hiddenCards.clear();
+        List<View> seq = new ArrayList<>();
+        for (String key : CARD_KEYS) {
+            DraggableCardView card = cardForKey(key);
+            seq.add(card);
+            stack.showCard(card);
+        }
+        stack.applyOrder(seq);
+        // VIS4: everything is back where it started, including the log - the
+        // stack puts it there on the next frame.
+        updateLogVisibility();
+        saveCardLayout();
+        Toast.makeText(this, "Card layout reset", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Write the stack order and the hidden flags to dfroot_ui. */
+    private void saveCardLayout() {
+        List<String> keys = new ArrayList<>();
+        for (View v : binding.cardStack.cardOrder()) {
+            String key = keyForCard(v);
+            if (key != null && !keys.contains(key)) keys.add(key);
+        }
+        CardLayoutStore.saveOrder(mDeCtx, keys);
+        CardLayoutStore.saveHidden(mDeCtx, hiddenCards);
+    }
+
+    /** VIS2.1: the scrollable log blacks out while a card is in flight and
+     *  shows again once the card has found its spot. */
+    private void setLogHiddenForDrag(boolean hidden) {
+        if (logHiddenForDrag == hidden) return;
+        logHiddenForDrag = hidden;
+        // One fade for every reason the log has to come and go (VIS2.1): sliding
+        // it away while a card is in the air is the same motion as showing it at
+        // all, so it goes through the same place instead of fighting it for the
+        // alpha.
+        if (hidden) fadeLog(false);
+        else updateLogVisibility();
     }
 
     /** Re-read the SU manager selection when returning to the app: the user may

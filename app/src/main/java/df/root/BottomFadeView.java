@@ -18,15 +18,19 @@ public class BottomFadeView extends View {
 
     private final Paint paint = new Paint();
 
-    // Fade curve: transparent -> 40% at 32% -> 90% at 60% -> solid from 82%.
+    // Fade curve: nothing at all for the first half, then a long easy slope -
+    // 25% at half way, 60% at three quarters, solid only in the last tenth. The
+    // old curve was already 40% grey at a third of the way down and solid at 82%,
+    // which swallowed half the readable log and left the bottom of the box as
+    // dead black space.
     private static final int[] COLORS = {
             0x00000000,
-            0x66000000,
-            0xE6000000,
+            0x40000000,
+            0x99000000,
             0xFF000000,
             0xFF000000
     };
-    private static final float[] POSITIONS = {0f, 0.32f, 0.60f, 0.82f, 1f};
+    private static final float[] POSITIONS = {0f, 0.50f, 0.72f, 0.93f, 1f};
 
     public BottomFadeView(Context context) {
         super(context);

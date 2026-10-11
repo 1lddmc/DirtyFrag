@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.15
+
+### Movable card UI
+- The four cards are a stack you can rearrange. Hold one and it snaps under your finger, drop it where
+  you want it and the rest settle around it. The order is kept, so it survives a reboot and a re-run
+  of the exploit.
+- Every card except SU Manager can be hidden with the minus chip on its edge - the SU Manager card
+  refuses to be hidden so the stack can never be emptied by mistake - and **Menu -> Reset layout**
+  brings the whole stack back.
+- The advanced log belongs to the "Show advanced log" card: it hangs off that card's bottom edge,
+  travels with it, and takes its room with it the moment the card is lifted or hidden.
+
+### Engine - the run no longer dies at the verify stage (issue #5)
+- The kernel module's usermodehelper command is a `sh -c` chain that ended in
+  `rmmod oplus_security_guard`. Those three `rmmod` calls are Oppo/OnePlus only, so on every other
+  kernel the last command failed, `sh -c` returned its exit code and `call_usermodehelper_exec`
+  reported `returned 256` - the bootstrap never started and the run stopped at the verify stage. The
+  chain now ends in `exit 0`. Found and verified by @BrokenByteOfCode on a Samsung A07 4G (SM-A075F,
+  android16-6.12).
+- The eight embedded kernel modules were rebuilt from this source for this release, so the fix reaches
+  devices through the APK.
+
 ## 1.11
 
 Based on upstream DFRoot 4.1 (upstream 3.0 - 4.1 merged into this fork).
