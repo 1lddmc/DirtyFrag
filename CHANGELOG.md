@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Managers
+- zandatsu07's KernelSU-Next is no longer listed as a Samsung manager, following upstream: it only
+  worked on S23 and below with kernel 5.15, so it is dropped from the list until it works on every
+  Samsung device. diabl0w's KernelSU stays the Samsung manager and the non-Samsung list is unchanged.
+
 ## 1.15
 
 ### Movable card UI
