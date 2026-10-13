@@ -31,7 +31,9 @@ lkm/Module.symvers
 # Generated binaries
 out/
 app/src/main/jni/splicehelper
-app/src/main/jni/ko/*.ko
+# NOTE: app/src/main/jni/ko/*.ko is deliberately NOT ignored — the eight
+# prebuilt kernel modules are committed so a plain clone builds without a
+# DDK toolchain (see README). Rebuild & re-commit after lkm/dfroot.c changes.
 
 # stale APK copies dropped at the repo root by hand
 /dirtyfrag.apk
