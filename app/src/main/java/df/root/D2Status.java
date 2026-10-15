@@ -39,38 +39,67 @@ import java.util.Locale;
  * is what it is after every boot unless a service tool has just authorised the
  * device, and it fails in the safe direction: a wrong guess can only make the dot
  * red when Odin would in fact have worked, never green when it would not.
+ *
+ * The dot is a verdict, and a verdict you cannot argue with is just a coloured
+ * dot, so the pill also hands back the three facts behind it - lock screen,
+ * maintenance mode, and whether this firmware gates download mode at all. The
+ * toolbar submenu shows them as three lines, which means a dot the owner
+ * disagrees with can be read straight off the screen instead of having to be
+ * dug out of logcat.
  */
 final class D2Status {
 
-    enum State {
-        /** Not a Samsung device: there is nothing to indicate. */
-        NOT_SAMSUNG,
-        /** Firmware older than the lockdown, so Odin was never gated. */
-        NOT_APPLICABLE,
-        /** Odin will be let in. */
-        OPEN,
+    /** What the toolbar dot is painted. */
+    enum Dot {
+        /** Nothing to indicate: not Samsung firmware, or older than the lockdown. */
+        GREY,
+        /** Odin will be let in: no credential, or maintenance mode holding the door. */
+        GREEN,
         /** The D2 error: download mode refused while the device is locked. */
-        BLOCKED
+        RED
     }
 
     static final class Result {
-        final State state;
-        /** One line naming every input. Shown on long-press, and logged. */
+        /** Does this firmware gate download mode at all? */
+        final boolean supported;
+        /** Is a PIN, pattern or password set? That is the vault's lock. */
+        final boolean lockscreen;
+        /** Is Samsung's maintenance mode on? */
+        final boolean maintenance;
+        final Dot dot;
+        /** One line naming every input, including the ones the rows leave out. */
         final String detail;
 
-        Result(State state, String detail) {
-            this.state = state;
+        Result(boolean supported, boolean lockscreen, boolean maintenance,
+               Dot dot, String detail) {
+            this.supported = supported;
+            this.lockscreen = lockscreen;
+            this.maintenance = maintenance;
+            this.dot = dot;
             this.detail = detail;
+        }
+
+        /** The three submenu rows, worded the way the pill means them. */
+        String lockscreenLabel() {
+            return lockscreen ? "Yes" : "No";
+        }
+
+        String maintenanceLabel() {
+            return maintenance ? "On" : "Off";
+        }
+
+        String deviceLabel() {
+            return supported ? "Supported" : "Unsupported";
         }
     }
 
     /**
      * Settings provider keys Samsung has been seen using for maintenance mode,
      * Global first then Secure. An absent key simply reads back null, so a wrong
-     * guess costs a grey assumption rather than a crash - and the detail line
-     * names the key that answered, so if Samsung renames it in some future
-     * firmware a wrong dot is traceable from one log line instead of failing
-     * silently the way the vault read did.
+     * guess costs a pessimistic red dot rather than a crash - the submenu row
+     * then reads Off, and the detail line names the key that answered, so if
+     * Samsung renames it in some future firmware a wrong dot is traceable from one
+     * log line instead of failing silently the way the vault read did.
      */
     private static final String[] MAINTENANCE_KEYS = {
             "maintenance_mode",
@@ -91,17 +120,21 @@ final class D2Status {
      * Settings provider is a binder round trip per key.
      */
     static Result read(Context ctx) {
-        if (!isSamsung()) {
-            return new Result(State.NOT_SAMSUNG, Build.MANUFACTURER + " " + Build.MODEL
-                    + ": the D2 lockdown is Samsung firmware, nothing to indicate");
-        }
-
+        // A device only "supports" the indicator when its firmware gates download
+        // mode at all: no non-Samsung firmware does, and neither does Samsung
+        // firmware older than the lockdown. Those get a grey dot rather than a
+        // pill that quietly vanishes, and the submenu says why in one word.
+        boolean supported = isSamsung() && !predatesLockdown();
         boolean secure = isLockScreenSecured(ctx);
-        String maintenanceKey = secure ? maintenanceModeKey(ctx) : null;
-        boolean gated = secure && maintenanceKey == null;
+        String maintenanceKey = maintenanceModeKey(ctx);
+        boolean maintenance = maintenanceKey != null;
 
-        State state = predatesLockdown() ? State.NOT_APPLICABLE
-                : gated ? State.BLOCKED : State.OPEN;
+        // The bootloader refuses Odin on [1, 0, 0] - a credential, no maintenance
+        // mode and no service authorisation - so a free lock screen or an open
+        // maintenance mode both mean green. at_command is assumed cleared, which
+        // can only ever make the dot too pessimistic, never too optimistic.
+        Dot dot = !supported ? Dot.GREY
+                : (secure && !maintenance) ? Dot.RED : Dot.GREEN;
 
         StringBuilder d = new StringBuilder();
         d.append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
@@ -109,18 +142,18 @@ final class D2Status {
                 .append(": lockscreen=").append(secure ? "credential" : "none")
                 .append(" maintenance=").append(maintenanceKey != null ? maintenanceKey : "off or unreadable")
                 .append(" at_command=0 assumed -> ");
-        switch (state) {
-            case BLOCKED:
-                d.append("D2 error expected, download mode refused");
+        switch (dot) {
+            case RED:
+                d.append("red, D2 error expected: download mode refused");
                 break;
-            case NOT_APPLICABLE:
-                d.append("firmware predates the lockdown, download mode never gated");
+            case GREEN:
+                d.append("green, Odin allowed");
                 break;
             default:
-                d.append("Odin allowed");
+                d.append("grey, this device does not gate download mode");
                 break;
         }
-        return new Result(state, d.toString());
+        return new Result(supported, secure, maintenance, dot, d.toString());
     }
 
     private static boolean isSamsung() {

@@ -23,7 +23,6 @@ import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.core.content.res.ResourcesCompat;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -62,11 +61,14 @@ public class MainActivity extends AppCompatActivity implements IReporter {
     private static final float KSU_CIRCLE_DP = 54f;
     private static final float KSU_GAP_DP = 12f;
     private android.animation.ValueAnimator ksuMorph;
-    private VersionPillSpan pillSpan;
+    private android.animation.ValueAnimator updateMorph;
     private TextView titleView;
-    private boolean updateAvailable;
-    /** The inputs the D2 pill was computed from, for its long-press. */
-    private String d2Detail;
+    /** The headline's width in px, taken from the toolbar's own title paint - the
+     *  only paint that knows how wide "DirtyFrag" renders, and therefore how wide
+     *  the update pill has to be to cover it. See showUpdatePill. */
+    private int headlinePx;
+    /** The last Odin reading, kept for the pill's submenu. Null until first read. */
+    private D2Status.Result mOdin;
     private boolean moduleRefresh;
 
     /** Device-protected storage context: bootstrap.c reads its prefs from
@@ -450,33 +452,36 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        // Version tag flowing right after the header title. Straight out of
-        // versionName, so the pill, the update check (which reads the installed
-        // package info) and the APK itself can never disagree.
-        String head = "DirtyFrag " + BuildConfig.VERSION_NAME;
-        SpannableString title = new SpannableString(head);
-        pillSpan = new VersionPillSpan(0.45f);
-        title.setSpan(pillSpan, "DirtyFrag ".length(), head.length(),
-                SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
-        binding.toolbar.setTitle(title);
+        // The header is the app's name and nothing else. The version number that
+        // used to ride next to it is still recorded, just not in the one line of
+        // chrome the user has to look past to reach the cards: on every start here,
+        // and in the run log as "app version: ..." (ExploitRunner). What takes the
+        // headline instead is the update pill, but only once the check below has
+        // something to say - see showUpdatePill.
+        Log.i(TAG, "version " + BuildConfig.VERSION_NAME);
         // NOTE: no setSupportActionBar() - it makes the ActionBar delegate draw
         // the title and ignore the toolbar's titleTextAppearance (breaks bold).
         // The toolbar renders its own title via app:titleTextAppearance.
 
-        // Update check (SamSU-style): the pill around the version turns green
-        // when GitHub has a newer release; tapping the title opens the releases
-        // page (only while an update is flagged, so it stays a no-op otherwise).
+        // Update check (SamSU-style): when GitHub has a newer release, the headline
+        // is covered by a lime pill reading "Update" and tapping that pill opens the
+        // releases page. No newer release, no pill - the header stays the plain word.
+        binding.updatePill.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+            openUrl("https://github.com/mitschud/DirtyFrag/releases");
+        });
         mExec.execute(this::checkForAppUpdate);
 
-        // D2 / Odin availability: the pill left of the menu button. Computed from
-        // the same inputs Samsung writes into its DMC vault, so it needs no root -
-        // see D2Status for why reading the vault itself cannot work from here.
-        binding.d2Pill.setOnLongClickListener(v -> {
+        // Odin / download-mode availability: the pill left of the menu button,
+        // built from the same inputs Samsung writes into its DMC vault, so it
+        // needs no root - see D2Status for why reading the vault itself cannot
+        // work from here. Tapping it opens a submenu of the three facts behind the
+        // dot, which is what makes a wrong dot arguable without a cable.
+        binding.odinPill.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-            if (d2Detail != null) Toast.makeText(this, d2Detail, Toast.LENGTH_LONG).show();
-            return true;
+            showOdinPopup();
         });
-        mExec.execute(this::refreshD2);
+        mExec.execute(this::refreshOdin);
 
         // SU Manager card: upstream 3.2 deleted the bundled assets/ksud, so the
         // exploit stages libksud.so out of the chosen manager's
@@ -505,20 +510,25 @@ public class MainActivity extends AppCompatActivity implements IReporter {
             applyModuleState(on);
         });
 
-        // Force real bold (wght 700) One UI Sans on the toolbar title TextView.
+        // Force real bold (wght 700) One UI Sans on the toolbar title TextView -
+        // and on the two pill labels, whose textStyle="bold" alone renders lighter
+        // than the title's explicit wght 700 next to them.
         binding.toolbar.post(() -> {
             Typeface base = ResourcesCompat.getFont(this, R.font.inter_vf);
             if (base == null) return;
             Typeface bold = Typeface.create(base, 700, false);
+            binding.odinLabel.setTypeface(bold);
+            binding.updateLabel.setTypeface(bold);
             for (int i = 0; i < binding.toolbar.getChildCount(); i++) {
                 View child = binding.toolbar.getChildAt(i);
                 if (child instanceof TextView) {
                     titleView = (TextView) child;
                     titleView.setTypeface(bold);
-                    titleView.setOnClickListener(v -> {
-                        if (updateAvailable) openUrl(
-                                "https://github.com/mitschud/DirtyFrag/releases");
-                    });
+                    // Measured with the title's own paint, after its own typeface has
+                    // been set, because that is the combination the headline renders
+                    // in - and the update pill has to be exactly this wide to cover it.
+                    headlinePx = Math.round(
+                            titleView.getPaint().measureText("DirtyFrag"));
                 }
             }
         });
@@ -1091,7 +1101,6 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         // stack puts it there on the next frame.
         updateLogVisibility();
         saveCardLayout();
-        Toast.makeText(this, "Card layout reset", Toast.LENGTH_SHORT).show();
     }
 
     /** Write the stack order and the hidden flags to dfroot_ui. */
@@ -1143,13 +1152,11 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         if (on) ed.remove("disable_modules");
         else ed.putBoolean("disable_modules", true);
         ed.apply();
+        // The subtitle is the whole message. Nothing is announced over the bottom
+        // of the screen for a switch the user can already see move.
         binding.modulesSubtitle.setText(on
                 ? "Enabled - Active at next reroot"
                 : "Disabled - No Modules on reroot");
-        Toast.makeText(this,
-                on ? "KSU modules enabled - applies at next root"
-                        : "KSU modules disabled - applies at next root",
-                Toast.LENGTH_SHORT).show();
     }
 
     // ---- SU manager picker --------------------------------------------------
@@ -1353,6 +1360,75 @@ public class MainActivity extends AppCompatActivity implements IReporter {
                 .setStrokeColor(ColorStateList.valueOf(ok ? 0xFFA6A6A6 : 0xFF1F1F1F));
     }
 
+    /**
+     * The headline's update state: a lime capsule exactly as wide as the word
+     * "DirtyFrag" and the same 44dp module as the two toolbar controls to its right,
+     * which wipes in from the left edge and reads "Update" in the headline's place.
+     * The version number used to ride here in a small pill over the digits; the
+     * headline is the app's own name, and covering it with the one thing that might
+     * be worth acting on is both louder and roomier than 4.5pt of digits was.
+     *
+     * The pill takes the title's slot rather than being drawn over the title: a
+     * toolbar lays its children out in a row, so the only way to sit on top of the
+     * title would be to be drawn by it, and a ReplacementSpan's pill cannot be 44dp
+     * tall inside a text line box. Hence setTitle("") first - the title view goes
+     * empty, stops taking space, and the pill moves into that space without anything
+     * else in the header shifting. Width only, left edge pinned, 250ms Decelerate:
+     * the same one-axis / one-side feel as the Run pill's shrink and the KSU morph.
+     */
+    private void showUpdatePill() {
+        if (binding.updatePill.getVisibility() == View.VISIBLE) return;
+        binding.toolbar.setTitle("");
+        int word = headlinePx;
+        if (word <= 0) {
+            // The font failed to load, so no title paint measured the headline. A
+            // pill that just fits its own word is honest; a guessed width is not.
+            word = Math.round(binding.updateLabel.getPaint().measureText("Update"));
+        }
+        // Wider than the word it replaces. The headline's advance is exactly as wide
+        // as a word, and a capsule cut to that reads as a badge clipped to its own
+        // text; 24dp of lime on each side makes it a control with an edge, in the
+        // same 44dp module as the two controls to its right. Measured on a 384dp
+        // screen it still stops 54dp short of the Odin pill.
+        int w = word + Math.round(48 * getResources().getDisplayMetrics().density);
+        // The label is given the pill's final width on the way in and centres itself
+        // in that, so the growing pill uncovers the word instead of dragging its
+        // centre along with its right edge.
+        android.widget.FrameLayout.LayoutParams lp =
+                (android.widget.FrameLayout.LayoutParams)
+                        binding.updateLabel.getLayoutParams();
+        lp.width = w;
+        binding.updateLabel.setLayoutParams(lp);
+
+        binding.updatePill.setVisibility(View.VISIBLE);
+        if (updateMorph != null && updateMorph.isRunning()) updateMorph.cancel();
+        updateMorph = android.animation.ValueAnimator.ofInt(0, w);
+        updateMorph.setDuration(250);
+        updateMorph.setInterpolator(
+                new android.view.animation.DecelerateInterpolator());
+        updateMorph.addUpdateListener(anim -> setUpdatePillWidth(
+                (int) anim.getAnimatedValue()));
+        // As in morphKsuToPill: one last layout after the final width frame, so the
+        // label inside settles where the finished pill wants it.
+        updateMorph.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                binding.updatePill.requestLayout();
+            }
+        });
+        updateMorph.start();
+    }
+
+    /** The update pill's animated width. layout_gravity="start" welds its left edge
+     *  to the headline's, so only the right edge travels. */
+    private void setUpdatePillWidth(int px) {
+        androidx.appcompat.widget.Toolbar.LayoutParams lp =
+                (androidx.appcompat.widget.Toolbar.LayoutParams)
+                        binding.updatePill.getLayoutParams();
+        lp.width = px;
+        binding.updatePill.setLayoutParams(lp);
+    }
+
     /** SamSU-style GitHub release check: the pill around the version turns
      *  green when the latest published release tag differs from this build's
      *  versionName. Silent on offline / rate-limit / API hiccups. */
@@ -1386,61 +1462,168 @@ public class MainActivity extends AppCompatActivity implements IReporter {
             }
             if (latest.equalsIgnoreCase(mine)) return;
             Log.i(TAG, "update check: update available (latest=" + latest + ")");
-            mMain.post(() -> {
-                updateAvailable = true;
-                // Grow the pill from its left edge into the lime update state,
-                // same 250ms feel as the Run pill's shrink.
-                if (titleView != null) {
-                    android.animation.ValueAnimator a =
-                            android.animation.ValueAnimator.ofFloat(0f, 1f);
-                    a.setDuration(250);
-                    a.addUpdateListener(anim -> {
-                        pillSpan.setProgress((float) anim.getAnimatedValue());
-                        titleView.invalidate();
-                    });
-                    a.start();
-                } else {
-                    pillSpan.setProgress(1f);
-                }
-            });
+            mMain.post(this::showUpdatePill);
         } catch (Exception e) {
             Log.i(TAG, "update check failed: " + e);
         }
     }
 
     /**
-     * Reads the D2 / Odin state and paints the toolbar pill: lime when download
-     * mode will be let in, red when the firmware will answer with the D2 error,
-     * grey when this firmware never gated it, hidden on devices that have no such
-     * feature. Runs on the background executor because D2Status reads the Settings
-     * provider; the pill itself is touched on the UI thread. The detail line goes
-     * to logcat under this tag, so a dot the owner disagrees with can be traced to
-     * the inputs that produced it rather than being a mystery, which is how the
-     * vault-reading attempt of this feature stayed undiagnosable.
+     * Reads the Odin / download-mode state and paints the toolbar dot: green when
+     * download mode is not gated, red when the firmware will answer with the D2
+     * error, grey when this device does not gate download mode at all - which is
+     * also what a non-Samsung device gets, so the control never vanishes on a
+     * Galaxy for no visible reason. Runs on the background executor because
+     * D2Status reads the Settings provider; the dot itself is touched on the UI
+     * thread. The inputs go to logcat under this tag as well as into the submenu,
+     * so a dot the owner disagrees with is traceable to the facts that produced it
+     * rather than being a mystery, which is how the vault-reading attempt at this
+     * feature stayed undiagnosable.
      */
-    private void refreshD2() {
+    private void refreshOdin() {
         D2Status.Result r = D2Status.read(this);
         mMain.post(() -> {
-            Log.i(TAG, "d2: " + r.detail);
-            d2Detail = r.detail;
+            Log.i(TAG, "odin: " + r.detail);
+            mOdin = r;
             int dot;
-            switch (r.state) {
-                case NOT_SAMSUNG:
-                    binding.d2Pill.setVisibility(View.GONE);
-                    return;
-                case OPEN:
-                    dot = 0xFFAEEA00;    // lime, the same all-clear the update pill uses
-                    break;
-                case BLOCKED:
-                    dot = 0xFFE57373;    // the red the failure bar already uses
-                    break;
-                default:
-                    dot = 0xFF6E6E6E;    // grey: nothing to indicate on this firmware
-                    break;
+            if (r.dot == D2Status.Dot.GREEN) {
+                dot = 0xFFAEEA00;            // lime, the update pill's all-clear
+            } else if (r.dot == D2Status.Dot.RED) {
+                dot = 0xFFE57373;            // the red the failure bar already uses
+            } else {
+                dot = 0xFF6E6E6E;            // grey: nothing to indicate here
             }
-            binding.d2Dot.setBackgroundTintList(ColorStateList.valueOf(dot));
+            binding.odinDot.setBackgroundTintList(ColorStateList.valueOf(dot));
         });
     }
+    /**
+     * The submenu that hangs off the Odin pill: the three facts the dot is
+     * computed from, as three lines. Same rounded card, 46dp rows, hairline
+     * separators, scale-in and dimmed backdrop as the overflow menu, because two
+     * popups that do different jobs should look like the same control. Read-only,
+     * so the rows carry no press highlight and an outside tap closes it.
+     */
+    private void showOdinPopup() {
+        D2Status.Result r = mOdin;
+        if (r == null) {
+            // The first tap beat the background read. Reading here costs three
+            // binder round trips on a tap, which is the one moment that is free.
+            r = D2Status.read(this);
+            mOdin = r;
+        }
+        float md = getResources().getDisplayMetrics().density;
+        final D2Status.Result shown = r;
+
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setBackgroundResource(R.drawable.popup_bg);
+        box.setPadding(0, (int) (6 * md), 0, (int) (6 * md));
+
+        box.addView(odinRow("Lockscreen", shown.lockscreenLabel()), odinRowLp(md));
+        box.addView(odinSep(md), odinSepLp(md));
+        box.addView(odinRow("Maintenance Mode", shown.maintenanceLabel()), odinRowLp(md));
+        box.addView(odinSep(md), odinSepLp(md));
+        box.addView(odinRow("Device", shown.deviceLabel()), odinRowLp(md));
+
+        box.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        int pw_w = Math.max(box.getMeasuredWidth(), (int) (230 * md));
+
+        final android.widget.PopupWindow pw = new android.widget.PopupWindow(box,
+                pw_w, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        pw.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                android.graphics.Color.TRANSPARENT));
+        pw.setOutsideTouchable(true);
+        pw.setOnDismissListener(() ->
+                binding.dimOverlay.animate().alpha(0f).setDuration(150)
+                        .withEndAction(() -> binding.dimOverlay
+                                .setVisibility(View.GONE)).start());
+
+        box.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, android.graphics.Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), 26 * md);
+            }
+        });
+        box.setClipToOutline(true);
+        box.setElevation(48 * md);
+
+        // Right-aligned under the pill, which is how the overflow menu hangs off
+        // its own button. Clamped to an 8dp margin so a popup wider than the
+        // screen cannot walk off the left edge.
+        int[] loc = new int[2];
+        binding.odinPill.getLocationOnScreen(loc);
+        int x = Math.max((int) (8 * md),
+                loc[0] + binding.odinPill.getWidth() - pw_w);
+        int y = loc[1] + binding.odinPill.getHeight() + (int) (4 * md);
+
+        binding.dimOverlay.setVisibility(View.VISIBLE);
+        binding.dimOverlay.setAlpha(0f);
+        binding.dimOverlay.animate().alpha(0.5f).setDuration(150).start();
+        box.setPivotX(pw_w);
+        box.setPivotY(0f);
+        box.setScaleX(0.85f);
+        box.setScaleY(0.9f);
+        box.setAlpha(0f);
+        pw.showAtLocation(binding.odinPill,
+                android.view.Gravity.TOP | android.view.Gravity.START, x, y);
+        box.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(150)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
+    }
+
+    /**
+     * One row of the Odin submenu: label left, value right, on the overflow menu's
+     * 46dp row and in its 15sp type. The label takes the menu's grey and the value
+     * its near-white, so the half of the pair that can only be read is the dimmer
+     * one and the answer is what the eye lands on.
+     */
+    private android.widget.LinearLayout odinRow(String label, String value) {
+        float md = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
+        row.setPadding((int) (20 * md), 0, (int) (20 * md), 0);
+
+        TextView name = new TextView(this);
+        name.setText(label);
+        name.setTextColor(0xFF9E9E9E);
+        name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        row.addView(name, new android.widget.LinearLayout.LayoutParams(
+                0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView state = new TextView(this);
+        state.setText(value);
+        state.setTextColor(0xFFE8E8E8);
+        state.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        row.addView(state, new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
+    /** The overflow menu's row height, so the two popups are cut from one cloth. */
+    private static android.widget.LinearLayout.LayoutParams odinRowLp(float md) {
+        return new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT, (int) (46 * md));
+    }
+
+    /** The hairline between two rows of the Odin submenu. */
+    private android.view.View odinSep(float md) {
+        android.view.View sep = new android.view.View(this);
+        sep.setBackgroundColor(0xFF3F3F3F);
+        return sep;
+    }
+
+    /** That hairline, inset 20dp from the card's edges exactly like the menu's. */
+    private static android.widget.LinearLayout.LayoutParams odinSepLp(float md) {
+        android.widget.LinearLayout.LayoutParams lp =
+                new android.widget.LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        Math.max(1, (int) md));
+        lp.setMargins((int) (20 * md), 0, (int) (20 * md), 0);
+        return lp;
+    }
+
 
     /** Failure presentation: left bar label "Failure", right label "Reboot",
      *  bars + labels red, run pill greyed out like the Running/Rooted state.
@@ -1612,13 +1795,13 @@ public class MainActivity extends AppCompatActivity implements IReporter {
      *  hardcoded package list that no longer matches reality. */
     private void openKsu() {
         if (suManagerPkg == null) {
-            Toast.makeText(this, "No SU manager selected", Toast.LENGTH_SHORT).show();
+            // Nothing to say: the launcher circle is only lit once a manager is
+            // picked, so getting here is a no-op rather than an error.
             return;
         }
         Intent launch = getPackageManager().getLaunchIntentForPackage(suManagerPkg);
         if (launch == null) {
-            Toast.makeText(this, suManagerPkg + " cannot be launched",
-                    Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "no launch intent for " + suManagerPkg);
             return;
         }
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1704,7 +1887,7 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception e) {
-            Toast.makeText(this, "No browser found", Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "no browser for " + url);
         }
     }
 

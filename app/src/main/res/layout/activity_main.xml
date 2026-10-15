@@ -35,43 +35,99 @@
                 android:scaleType="center"
                 android:src="@drawable/ic_more" />
 
-            <!-- D2 / Odin availability, sitting left of the menu button. Samsung's
-                 April 2026 firmwares answer download mode with a D2 error while a
-                 lock-screen credential is set: green dot means Odin will be let in,
-                 red means it will not, grey means this firmware never gated it.
-                 Long-press for the inputs it used. Hidden on non-Samsung devices,
-                 where the feature does not exist. See D2Status. -->
+            <!-- The update pill: the headline's replacement. Same 44dp capsule as
+                 the Odin pill and the menu button, but lime, and exactly as wide as
+                 the word it covers - when the release check comes back with newer,
+                 "DirtyFrag" is gone and this reads "Update" in its place, wiping in
+                 from the left edge (see showUpdatePill). The version number it
+                 displaces is not lost, only relocated: logged on every start and
+                 reported by the exploit run as "app version: ...".
+
+                 The pill's left edge is the headline's - 90px at 450dpi, measured -
+                 and the 32dp start margin is what puts it there: this Material
+                 toolbar lays its start children out at a content inset of nothing at
+                 all (measured: a 16dp margin rendered 45px, exactly the margin), so
+                 the margin alone has to carry the title's own 32dp titleMarginStart.
+                 It takes the title's slot instead of drawing over it because a
+                 toolbar lays its children out in a row: two views in that row push
+                 each other sideways, and a view drawn on top of the title is clipped
+                 by the title's own line box. -->
+            <FrameLayout
+                android:id="@+id/updatePill"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="32dp"
+                android:background="@drawable/bg_update_pill"
+                android:clickable="true"
+                android:contentDescription="Update available, open the release page"
+                android:focusable="true"
+                android:visibility="gone">
+
+                <!-- Fixed to the headline's width in code and centred inside that,
+                     so the growing pill reveals the word instead of dragging its
+                     centre along with it. -->
+                <TextView
+                    android:id="@+id/updateLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="start|center_vertical"
+                    android:gravity="center"
+                    android:text="Update"
+                    android:textColor="#FF101418"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+            </FrameLayout>
+
+            <!-- Odin / download-mode availability, left of the menu button. It is
+                 deliberately the same 44dp square-module size as that button and
+                 the same #1C1C1C fill, so the two read as one pair of toolbar
+                 controls rather than a title badge and a button.
+
+                 The dot says whether this firmware will let the device into Odin:
+                 green = download mode is not gated, red = the D2 error, grey =
+                 this device does not gate download mode at all. Tapping the pill
+                 opens a submenu with the three facts the dot was computed from.
+                 Samsung's April 2026 firmwares answer download mode with a D2
+                 error while a lock-screen credential is set. See D2Status.
+
+                 16dp of air each side rather than the tight 10/12 the dot and word
+                 need: at 62dp the pill read as a tag hanging off the word "Odin",
+                 and at 72dp it reads as the third toolbar control, which is what it
+                 is. Equal padding both sides because there is nothing asymmetric in
+                 it any more. -->
             <LinearLayout
-                android:id="@+id/d2Pill"
+                android:id="@+id/odinPill"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_gravity="end|center_vertical"
                 android:layout_marginEnd="6dp"
-                android:background="@drawable/bg_d2_pill"
+                android:background="@drawable/bg_odin_pill"
                 android:clickable="true"
                 android:contentDescription="Odin download mode availability"
                 android:focusable="true"
                 android:gravity="center_vertical"
+                android:minWidth="44dp"
                 android:orientation="horizontal"
-                android:paddingStart="8dp"
-                android:paddingTop="3dp"
-                android:paddingEnd="9dp"
-                android:paddingBottom="3dp">
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
 
                 <View
-                    android:id="@+id/d2Dot"
+                    android:id="@+id/odinDot"
                     android:layout_width="8dp"
                     android:layout_height="8dp"
                     android:background="@drawable/bg_circle"
                     android:backgroundTint="#FF6E6E6E" />
 
                 <TextView
+                    android:id="@+id/odinLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="5dp"
-                    android:text="D2"
+                    android:text="Odin"
                     android:textColor="#FFD9D9D9"
-                    android:textSize="10sp"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
 
             </LinearLayout>
