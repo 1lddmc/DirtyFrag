@@ -18,29 +18,39 @@
 
 Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
 
-### Engine - non-Samsung and MTK devices stop rebooting (issue #21)
+### Engine - vendor hardening is patched in place instead of removed (issue #21)
 - The kernel module no longer runs `rmmod oplus_secure_harden`, `rmmod oplus_security_keventupload` and
-  `rmmod oplus_security_guard`. On an Oppo/OnePlus MTK kernel those modules sit on a notifier chain, so
-  removing them made the vendor security daemon hit a user-space `BUG()` and the device rebooted to a
-  black screen on every run - reported on a OnePlus Ace6 (VT0X5AOWUU7U/ocloud-cn, N123, ColorOS
-  16.0.7.101). Their permission checks are now neutralised in-kernel instead: the module kprobes
-  `defex_enforce_permission`, `keventupload_permission` and `oplus_pkey_mprotect_enforce_permission`,
-  patches the probed instruction into `mov w0, #0; ret` with `aarch64_insn_patch_text`, walks the
-  hardening notifier blocks out of the chain, and puts the original instructions back afterwards.
+  `rmmod oplus_security_guard`. Removing those modules on an Oppo/OnePlus kernel tripped the vendor
+  security anti-tamper path and the device rebooted to a black screen on every run - reported on a OnePlus
+  Ace6 (VT0X5AOWUU7U/ocloud-cn, N123, ColorOS 16.0.7.101).
+- A new `patch_fn_ret_zero()` writes `mov w0, #0; ret` over the first two instructions of the handlers
+  that were causing the trouble, so the modules stay loaded and their checks simply return allowed. It is
+  applied to `oplus_exe_block_ret_handler` and `oplus_root_check_post_handler`, found through
+  `module_kallsyms_lookup_name`, and to Samsung's `task_defex_enforce` and `task_defex_user_exec`, which
+  in 1.15 were kprobes that rewrote `x0` on every hit. The patcher skips a `BTI`/`PACIASP`/`PACIBSP`
+  preamble and emits `retaa`/`retab` only when the SoC really has pointer authentication.
 - `call_usermodehelper_exec` is called with `UMH_WAIT_EXEC` instead of `UMH_WAIT_PROC`, so the module no
   longer waits for the helper's exit status. That wait is the other half of the MTK reboot, and the status
   it reported is what a Samsung saw as `returned 256` in 1.15 (issue #5). The helper command is now simply
-  `touch /dev/dfm0; exec /data/user_de/0/df.root/bootstrap`, so the `exit 0` workaround from 1.15 is gone -
+  `touch /dev/dfm0; exec /data/user_de/0/df.root/bootstrap`, so the `exit 0` workaround from 1.15 is gone:
   there is no longer a failing command at the end of the chain to mask.
+- Housekeeping around the module: it now fails its own init with `-ENODEV` to get itself unloaded, and
+  bootstrap runs `rmmod dfroot` once late-load has finished and before a soft-reboot, rather than only at
+  the very end where a reboot skipped it.
+- The `.ko` keep their `.note.gnu.build-id` section. Upstream stopped stripping it, which is what kept a
+  Galaxy A34 (SM-A346M, kernel 6.6.92) from loading the module at all.
 
-### Engine - the right kernel module gets picked more often
-- **Code cave fallback.** When the loader found no executable code cave it failed with a bare
-  `[-] Failed to find a suitable code cave` and no detail. It now reports the candidates it examined and
-  falls back to the start of the first writable and executable mapping it can find, so devices that died
-  here can run.
-- **BTI/PAC kernels.** On a kernel built with branch target identification and pointer authentication the
-  payload used to abort on its own preamble before it started. The preamble handles those instructions
-  properly now (upstream `I hate BTI/PAC`).
+### Engine - the payload gets a place to live on more devices
+- The loader used to put the shellcode straight after the end of the executable `PT_LOAD` segment and give
+  up if the remaining slack in that page was too small, with a bare `[-] Failed to find a suitable code
+  cave`. It now scans the executable segment for a run of zero bytes - the alignment padding between
+  functions - that is big enough, prints the offset it chose, and reports the largest run it found when
+  there is none, so a log says something useful instead of nothing.
+- The hook site preamble is now recognised properly: `PACIASP`, `PACIBSP`, `BTI`, `BTI c`, `BTI j` and
+  `BTI jc`, up to two words deep, where before only `PACIASP` and one form of `BTI` were handled once.
+- With the shellcode no longer always at the end of the segment, the branch back to the hook and the saved
+  first instruction were being written into the wrong buffer, which produced a patch that crashed instead
+  of hopping. Both are now written into the padded buffer that is actually placed in the cave.
 
 ### App
 - The run banner in the advanced log opens with `app version:`, so a pasted log says which build produced
@@ -50,10 +60,11 @@ Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
 - The manager check became a `hasKsud()` helper, which tests `nativeLibraryDir` for null first.
 
 ### Fixed - unsafe getprop fallback
-Upstream's new fallback for kernels that leave the Android version out of `uname -r` never checked the
-`popen()` result and rebuilt the version string with `sprintf` into a 15 byte stack buffer from a 5 byte
-read, so a long or non-numeric `ro.vendor.build.version.release` overflowed it. The property is now read
-into a zero-initialised buffer and only a leading integer is accepted. The same hardening shipped in
+Upstream added a fallback for kernels that leave the Android version out of `uname -r`, reading
+`ro.vendor.build.version.release`. It never checked the `popen()` result and rebuilt the version string
+with `sprintf` into a 15 byte stack buffer from a 5 byte read, so a long or non-numeric property
+overflowed it. The property is now read into a zero-initialised buffer and only a leading integer is
+accepted, which is all the caller wants. The same hardening shipped in
 [k10halifa/Dslice](https://github.com/k10halifa/Dslice).
 
 ### Built
