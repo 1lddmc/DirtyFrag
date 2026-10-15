@@ -58,6 +58,16 @@ Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
 - `run()` is `synchronized` and returns early when `/dev/df` already exists, so the boot autorun racing a
   manual tap no longer re-hooks over the first run and corrupts it.
 - The manager check became a `hasKsud()` helper, which tests `nativeLibraryDir` for null first.
+- The interface keeps its own scale. Every measurement in it belongs to one screen width in dp - the Run
+  pill is 48% of its parent minus a fixed 66dp, the toolbar and the 54dp circles are fixed dp holding sp
+  text - so a single One UI screen zoom step throws the pill allowance off and clips the title, and default
+  zoom breaks it outright. `MainActivity` now wraps its base context through `ScaleFix`, which derives a
+  density from the real pixel width so the app always lays out at 384dp, the width of a Galaxy S25 at
+  450dpi, and pins `fontScale` to 1.0 because the Font size slider breaks those same containers on its own
+  account. The correction is capped at 30% either side of what the device reports, and it returns the base
+  context untouched at the calibration width, so a device already there pays nothing. Verified on a Galaxy
+  S25 (SM-S931B): identical at every screen zoom and font size step. The price is that the system's own
+  Screen zoom and Font size no longer apply inside the app.
 
 ### Fixed - unsafe getprop fallback
 Upstream added a fallback for kernels that leave the Android version out of `uname -r`, reading
