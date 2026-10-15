@@ -2,10 +2,63 @@
 
 ## Unreleased
 
+- Watching [chisewaguri/DFRoot](https://github.com/chisewaguri/DFRoot/tree/upstream-standalone): it drops
+  the separate bootstrap binary and the staged copy of ksud, and has the kernel module exec the selected
+  manager's own `libksud.so`, passing the package name and both switches as insmod parameters. That is
+  worth taking once it is rebased onto upstream 4.5 and lands upstream - on its own the branch re-adds the
+  `rmmod oplus_*` chain behind issue #21, and it only writes the `dfm0`/`dfm1` markers our progress bar
+  does not read.
+
 ### Managers
 - zandatsu07's KernelSU-Next is no longer listed as a Samsung manager, following upstream: it only
   worked on S23 and below with kernel 5.15, so it is dropped from the list until it works on every
   Samsung device. diabl0w's KernelSU stays the Samsung manager and the non-Samsung list is unchanged.
+
+## 1.16
+
+Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
+
+### Engine - non-Samsung and MTK devices stop rebooting (issue #21)
+- The kernel module no longer runs `rmmod oplus_secure_harden`, `rmmod oplus_security_keventupload` and
+  `rmmod oplus_security_guard`. On an Oppo/OnePlus MTK kernel those modules sit on a notifier chain, so
+  removing them made the vendor security daemon hit a user-space `BUG()` and the device rebooted to a
+  black screen on every run - reported on a OnePlus Ace6 (VT0X5AOWUU7U/ocloud-cn, N123, ColorOS
+  16.0.7.101). Their permission checks are now neutralised in-kernel instead: the module kprobes
+  `defex_enforce_permission`, `keventupload_permission` and `oplus_pkey_mprotect_enforce_permission`,
+  patches the probed instruction into `mov w0, #0; ret` with `aarch64_insn_patch_text`, walks the
+  hardening notifier blocks out of the chain, and puts the original instructions back afterwards.
+- `call_usermodehelper_exec` is called with `UMH_WAIT_EXEC` instead of `UMH_WAIT_PROC`, so the module no
+  longer waits for the helper's exit status. That wait is the other half of the MTK reboot, and the status
+  it reported is what a Samsung saw as `returned 256` in 1.15 (issue #5). The helper command is now simply
+  `touch /dev/dfm0; exec /data/user_de/0/df.root/bootstrap`, so the `exit 0` workaround from 1.15 is gone -
+  there is no longer a failing command at the end of the chain to mask.
+
+### Engine - the right kernel module gets picked more often
+- **Code cave fallback.** When the loader found no executable code cave it failed with a bare
+  `[-] Failed to find a suitable code cave` and no detail. It now reports the candidates it examined and
+  falls back to the start of the first writable and executable mapping it can find, so devices that died
+  here can run.
+- **BTI/PAC kernels.** On a kernel built with branch target identification and pointer authentication the
+  payload used to abort on its own preamble before it started. The preamble handles those instructions
+  properly now (upstream `I hate BTI/PAC`).
+
+### App
+- The run banner in the advanced log opens with `app version:`, so a pasted log says which build produced
+  it; it reads the same `BuildConfig.VERSION_NAME` as the toolbar pill.
+- `run()` is `synchronized` and returns early when `/dev/df` already exists, so the boot autorun racing a
+  manual tap no longer re-hooks over the first run and corrupts it.
+- The manager check became a `hasKsud()` helper, which tests `nativeLibraryDir` for null first.
+
+### Fixed - unsafe getprop fallback
+Upstream's new fallback for kernels that leave the Android version out of `uname -r` never checked the
+`popen()` result and rebuilt the version string with `sprintf` into a 15 byte stack buffer from a 5 byte
+read, so a long or non-numeric `ro.vendor.build.version.release` overflowed it. The property is now read
+into a zero-initialised buffer and only a leading integer is accepted. The same hardening shipped in
+[k10halifa/Dslice](https://github.com/k10halifa/Dslice).
+
+### Built
+- The eight embedded kernel modules are rebuilt by CI from this source and committed, so the APK carries
+  exactly this engine.
 
 ## 1.15
 
