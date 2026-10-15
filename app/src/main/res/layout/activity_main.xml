@@ -35,6 +35,46 @@
                 android:scaleType="center"
                 android:src="@drawable/ic_more" />
 
+            <!-- D2 / Odin availability, sitting left of the menu button. Samsung's
+                 April 2026 firmwares answer download mode with a D2 error while a
+                 lock-screen credential is set: green dot means Odin will be let in,
+                 red means it will not, grey means this firmware never gated it.
+                 Long-press for the inputs it used. Hidden on non-Samsung devices,
+                 where the feature does not exist. See D2Status. -->
+            <LinearLayout
+                android:id="@+id/d2Pill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/bg_d2_pill"
+                android:clickable="true"
+                android:contentDescription="Odin download mode availability"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp">
+
+                <View
+                    android:id="@+id/d2Dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/bg_circle"
+                    android:backgroundTint="#FF6E6E6E" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="5dp"
+                    android:text="D2"
+                    android:textColor="#FFD9D9D9"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
 
         </com.google.android.material.appbar.MaterialToolbar>
 

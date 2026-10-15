@@ -65,6 +65,8 @@ public class MainActivity extends AppCompatActivity implements IReporter {
     private VersionPillSpan pillSpan;
     private TextView titleView;
     private boolean updateAvailable;
+    /** The inputs the D2 pill was computed from, for its long-press. */
+    private String d2Detail;
     private boolean moduleRefresh;
 
     /** Device-protected storage context: bootstrap.c reads its prefs from
@@ -466,8 +468,15 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         // page (only while an update is flagged, so it stays a no-op otherwise).
         mExec.execute(this::checkForAppUpdate);
 
-        // D2 vault status (Samsung VaultKeeper): Odin flashing allowed or
-        // locked. Read-only; non-Samsung devices show "not available".
+        // D2 / Odin availability: the pill left of the menu button. Computed from
+        // the same inputs Samsung writes into its DMC vault, so it needs no root -
+        // see D2Status for why reading the vault itself cannot work from here.
+        binding.d2Pill.setOnLongClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+            if (d2Detail != null) Toast.makeText(this, d2Detail, Toast.LENGTH_LONG).show();
+            return true;
+        });
+        mExec.execute(this::refreshD2);
 
         // SU Manager card: upstream 3.2 deleted the bundled assets/ksud, so the
         // exploit stages libksud.so out of the chosen manager's
@@ -1397,6 +1406,40 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         } catch (Exception e) {
             Log.i(TAG, "update check failed: " + e);
         }
+    }
+
+    /**
+     * Reads the D2 / Odin state and paints the toolbar pill: lime when download
+     * mode will be let in, red when the firmware will answer with the D2 error,
+     * grey when this firmware never gated it, hidden on devices that have no such
+     * feature. Runs on the background executor because D2Status reads the Settings
+     * provider; the pill itself is touched on the UI thread. The detail line goes
+     * to logcat under this tag, so a dot the owner disagrees with can be traced to
+     * the inputs that produced it rather than being a mystery, which is how the
+     * vault-reading attempt of this feature stayed undiagnosable.
+     */
+    private void refreshD2() {
+        D2Status.Result r = D2Status.read(this);
+        mMain.post(() -> {
+            Log.i(TAG, "d2: " + r.detail);
+            d2Detail = r.detail;
+            int dot;
+            switch (r.state) {
+                case NOT_SAMSUNG:
+                    binding.d2Pill.setVisibility(View.GONE);
+                    return;
+                case OPEN:
+                    dot = 0xFFAEEA00;    // lime, the same all-clear the update pill uses
+                    break;
+                case BLOCKED:
+                    dot = 0xFFE57373;    // the red the failure bar already uses
+                    break;
+                default:
+                    dot = 0xFF6E6E6E;    // grey: nothing to indicate on this firmware
+                    break;
+            }
+            binding.d2Dot.setBackgroundTintList(ColorStateList.valueOf(dot));
+        });
     }
 
     /** Failure presentation: left bar label "Failure", right label "Reboot",
