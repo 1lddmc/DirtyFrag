@@ -84,8 +84,7 @@ re-run a "slow" run, the daemon may still be working.
 
 **Q: How do I remove root cleanly?**
 
-A: Use the in-app **Remove KSU/KSUD** entry. Never run `ksud uninstall` by hand alongside DirtyFrag:
-it tries to restore a boot image backup that this flow never made, and can reboot the device.
+A: Before unrooting, use file manager with root and delete /data/adb/ (KernelSU, KSUD residue)
 
 ## Building
 
