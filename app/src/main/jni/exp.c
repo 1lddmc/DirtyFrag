@@ -306,21 +306,29 @@ static int read_device_versions(int *andr, int *major, int *minor) {
     if (sscanf(u.release, "%d.%d", major, minor) != 2) return -1;
     const char *m = strstr(u.release, "android");
     if (!m) {
+        /* Some vendor kernels drop the "androidNN" token from uname -r, which
+         * leaves nothing to parse here. ro.vendor.build.version.release carries
+         * the same number, so fall back to it - but the popen is untrusted: it
+         * can fail outright, and the property is neither guaranteed numeric nor
+         * short, so nothing is built until a leading integer has actually been
+         * read out of it. */
         printf("uname -r is missing Android version, trying getprop\n");
-
-        char vendor_ver[5];
-        char release[15];
-
+        char vendor_ver[16] = { 0 };
         FILE *f = popen("getprop ro.vendor.build.version.release", "r");
-        fgets(vendor_ver, sizeof(vendor_ver), f);
-        pclose(f);
-
-        sprintf(release, "android");
-        sprintf(eos(release), "%s", vendor_ver);
-
-        m = release;
+        if (f) {
+            if (!fgets(vendor_ver, sizeof(vendor_ver), f))
+                vendor_ver[0] = '\0';
+            pclose(f);
+        }
+        int prop = 0;
+        if (sscanf(vendor_ver, "%d", &prop) != 1 || prop <= 0) {
+            printf("getprop returned no usable Android version\n");
+            return -1;
+        }
+        *andr = prop;
+        return 0;
     }
-    *andr = atoi(m + 7);
+    *andr = atoi(m + strlen("android"));
     return (*andr > 0) ? 0 : -1;
 }
 
