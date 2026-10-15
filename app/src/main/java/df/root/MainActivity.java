@@ -430,6 +430,17 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         }
     }
 
+    /**
+     * Screen zoom and Font size are locked for the duration of the activity:
+     * the pill, toolbar and card geometry were all measured at one screen
+     * width in dp and stop agreeing with each other as soon as it moves. See
+     * {@link ScaleFix} for why the anchor is a width and not a dpi value.
+     */
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(ScaleFix.wrap(newBase));
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
