@@ -49,7 +49,7 @@ Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
 
 ### App
 - The run banner in the advanced log opens with `app version:`, so a pasted log says which build produced
-  it; it reads the same `BuildConfig.VERSION_NAME` as the toolbar pill.
+  it; it reads the same `BuildConfig.VERSION_NAME` the header used to carry.
 - `run()` is `synchronized` and returns early when `/dev/df` already exists, so the boot autorun racing a
   manual tap no longer re-hooks over the first run and corrupts it.
 - The manager check became a `hasKsud()` helper, which tests `nativeLibraryDir` for null first.
@@ -68,20 +68,41 @@ Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
   reach 384dp from its pixel width, so there the canvas settles wider than the layout expects instead of
   exactly on it. Phone widths are what was measured and verified; a foldable or tablet runs, but the pill
   allowance and the toolbar alignment are not guaranteed to hold there.
-- A **D2** pill sits left of the menu button in the toolbar: a dot and the letters D2 saying whether this
-  firmware will let the device into Odin. Galaxy firmwares from around April 2026 answer download mode with
-  a D2 error while the device has a lock-screen credential, because `DmcService` in `system_server` writes
-  `[lock, maintenance, at_command]` into a vaultkeeper trustlet in the TEE and the bootloader refuses Odin
-  on `[1, 0, 0]`. That vault is behind a signature-or-privileged permission, and DirtyFrag is deliberately
-  not a root client - it is the tool that gets you root, so it has to work on a device that has none - which
-  is why reading the vault, as an earlier attempt at this feature did, could only ever answer "unsupported"
-  on a real Galaxy. Instead it reads the two inputs the vault is built from, both public API: the
-  lock-screen credential through `KeyguardManager`, and Samsung's maintenance mode through the Settings
-  provider. Lime means download mode is not gated, red means it is, grey means the firmware predates the
-  lockdown, and non-Samsung devices do not show the pill at all. Long-press it for the inputs it used, which
-  also go to logcat, so a dot you disagree with is traceable instead of mysterious. `at_command` is the one
-  input an app cannot read; it is assumed cleared, which is what it is after every boot unless a service
-  tool has just authorised the device, and that can only make the dot too pessimistic, never too optimistic.
+- An **Odin** pill sits left of the menu button in the toolbar, cut from the same cloth as that button - the
+  same 44dp height and the same #1C1C1C capsule - and its dot says whether this firmware will let the device
+  into Odin. Galaxy firmwares from around April 2026 answer download mode with a D2 error while the device
+  has a lock-screen credential, because `DmcService` in `system_server` writes `[lock, maintenance,
+  at_command]` into a vaultkeeper trustlet in the TEE and the bootloader refuses Odin on `[1, 0, 0]`. That
+  vault is behind a signature-or-privileged permission, and DirtyFrag is deliberately not a root client - it
+  is the tool that gets you root, so it has to work on a device that has none - which is why reading the
+  vault, as an earlier attempt at this feature did, could only ever answer "unsupported" on a real Galaxy.
+  Instead it reads the two inputs the vault is built from, both public API: the lock-screen credential
+  through `KeyguardManager`, and Samsung's maintenance mode through the Settings provider. Green means
+  download mode is not gated, red means it is, and grey means this device does not gate download mode at all
+  - which is also what a non-Samsung device now gets instead of a pill that vanished, so the control is
+  always there to explain itself. Tapping it opens a submenu of the three facts behind the dot - Lockscreen
+  Yes/No, Maintenance Mode On/Off, Device Supported/Unsupported - in the same card as the overflow menu,
+  which beats a coloured dot you have to argue with by cable; the same line still goes to logcat.
+  `at_command` is the one input an app cannot read; it is assumed cleared, which is what it is after every
+  boot unless a service tool has just authorised the device, and that can only make the dot too pessimistic,
+  never too optimistic.
+- No more toasts. Nothing in this app should be announced over the bottom of the screen for a second and
+  then vanish: resetting the layout, flipping the KSU modules switch, tapping a manager that cannot be
+  launched. The modules switch already says what it did in its own subtitle, the reset is visible in the
+  stack itself, and the two that looked like errors cannot strand the user - the manager launcher is only lit
+  when there is something to launch, and a manager with no launchable activity goes to logcat.
+- The version number is out of the header and the update announcement has taken its place. The header is the
+  app's name, the **Odin** control and the menu button; when the release check comes back with something newer,
+  a lime capsule wipes in from the left edge over the word **DirtyFrag** and reads **Update**, one tap from the
+  release page. What it replaces is a small pill over the version digits, drawn inside the title's own text
+  line: 10.8sp next to a 24sp word is not readable at arm's length, and it reserved its width from the first
+  frame whether or not an update was flagged, which with the wider Odin pill beside it left the title ellipsized
+  - "DirtyFrag…", version pill and all. A span cannot be the 44dp module everything else in the header is, so
+  the announcement is a View now, with 24dp of air on each side of its word: 158.9dp measured on a Galaxy S25
+  (SM-S931B), left edge on the headline's own, 54dp still clear of the Odin pill. An up to date header pays
+  nothing for it - the pill does not exist until the check answers, and the title no longer shares its line with
+  anything it has to make room for. The version is not lost, only relocated: `version <x>` to logcat on every
+  start, `app version: <x>` in the run log.
 
 ### Managers
 - zandatsu07's KernelSU-Next is no longer listed as a Samsung manager, following upstream: it only

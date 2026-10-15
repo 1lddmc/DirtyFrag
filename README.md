@@ -43,7 +43,9 @@ again after every reinstall.
 - **KernelSU Modules** on/off - works without root, applied by the kernel module before ksud starts
 - RO Partition Protection
 - Advanced log, with one tap to save it to Downloads
-- Update pill in the title, so you can see when a newer release is published
+- **Odin** pill in the toolbar: its dot says whether this firmware will let the device into download mode, and
+  tapping it opens the three facts that decision is made from
+- When a newer release is published, the headline itself becomes a lime **Update** pill - one tap from the release
 - Shizuku not needed
 
 ## FAQ
