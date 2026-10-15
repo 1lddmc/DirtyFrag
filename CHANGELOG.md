@@ -9,11 +9,6 @@
   `rmmod oplus_*` chain behind issue #21, and it only writes the `dfm0`/`dfm1` markers our progress bar
   does not read.
 
-### Managers
-- zandatsu07's KernelSU-Next is no longer listed as a Samsung manager, following upstream: it only
-  worked on S23 and below with kernel 5.15, so it is dropped from the list until it works on every
-  Samsung device. diabl0w's KernelSU stays the Samsung manager and the non-Samsung list is unchanged.
-
 ## 1.16
 
 Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
@@ -68,6 +63,30 @@ Based on upstream DFRoot 4.5 (upstream 4.2 - 4.5 merged into this fork).
   context untouched at the calibration width, so a device already there pays nothing. Verified on a Galaxy
   S25 (SM-S931B): identical at every screen zoom and font size step. The price is that the system's own
   Screen zoom and Font size no longer apply inside the app.
+- Wide screens are the known gap in that lock, not a solved case. The correction is capped at 30% either
+  side of the density the device reports, and a foldable opened flat, or a tablet, needs more than that to
+  reach 384dp from its pixel width, so there the canvas settles wider than the layout expects instead of
+  exactly on it. Phone widths are what was measured and verified; a foldable or tablet runs, but the pill
+  allowance and the toolbar alignment are not guaranteed to hold there.
+- A **D2** pill sits left of the menu button in the toolbar: a dot and the letters D2 saying whether this
+  firmware will let the device into Odin. Galaxy firmwares from around April 2026 answer download mode with
+  a D2 error while the device has a lock-screen credential, because `DmcService` in `system_server` writes
+  `[lock, maintenance, at_command]` into a vaultkeeper trustlet in the TEE and the bootloader refuses Odin
+  on `[1, 0, 0]`. That vault is behind a signature-or-privileged permission, and DirtyFrag is deliberately
+  not a root client - it is the tool that gets you root, so it has to work on a device that has none - which
+  is why reading the vault, as an earlier attempt at this feature did, could only ever answer "unsupported"
+  on a real Galaxy. Instead it reads the two inputs the vault is built from, both public API: the
+  lock-screen credential through `KeyguardManager`, and Samsung's maintenance mode through the Settings
+  provider. Lime means download mode is not gated, red means it is, grey means the firmware predates the
+  lockdown, and non-Samsung devices do not show the pill at all. Long-press it for the inputs it used, which
+  also go to logcat, so a dot you disagree with is traceable instead of mysterious. `at_command` is the one
+  input an app cannot read; it is assumed cleared, which is what it is after every boot unless a service
+  tool has just authorised the device, and that can only make the dot too pessimistic, never too optimistic.
+
+### Managers
+- zandatsu07's KernelSU-Next is no longer listed as a Samsung manager, following upstream: it only
+  worked on S23 and below with kernel 5.15, so it is dropped from the list until it works on every
+  Samsung device. diabl0w's KernelSU stays the Samsung manager and the non-Samsung list is unchanged.
 
 ### Fixed - unsafe getprop fallback
 Upstream added a fallback for kernels that leave the Android version out of `uname -r`, reading
@@ -80,6 +99,25 @@ accepted, which is all the caller wants. The same hardening shipped in
 ### Built
 - The eight embedded kernel modules are rebuilt by CI from this source and committed, so the APK carries
   exactly this engine.
+- The bundled Inter variable font is subset down to the glyphs the app can render: 2,937 glyphs and 2,852
+  codepoints become 829 and 427, 879,708 bytes become 239,308, and that takes **332,804 bytes out of the
+  APK** - 2.26 MB down to 1.93 MB, about a seventh of the download. It is the same font: Inter carries no
+  hinting tables at all, so a subset cannot change how a surviving glyph rasterises, and that was checked
+  rather than assumed - both fonts were instantiated at the two weights `res/font/inter.xml` declares and
+  every contour coordinate and advance width compared over 86 characters, which is every character the app
+  can put on screen, at zero differences. Both variation axes and all nine named instances are kept, and the
+  only OpenType features dropped are the ones that are off unless something asks for them (stylistic sets,
+  `cv01`-`cv14`, `ss01`-`ss08`, `dlig`, `frac`, `aalt`, ...). What is left covers Basic Latin, Latin-1,
+  combining marks, general punctuation, arrows, geometric shapes and dingbats. Anything outside that is not
+  lost: Android falls back per character, so a Cyrillic module description renders in the system font the
+  way emoji already did. `tools/subset_font.py` regenerates it, with `--latin-only` and `--wide` presets if
+  the coverage needs to move either way.
+- `android:debuggable="true"` is gone from the manifest, where upstream has carried it since its first
+  commit. It is not free: a debuggable APK can be `run-as` and ptraced by anything that has adb, which for
+  this app means readable preferences - the chosen SU manager, the module and autorun switches - and an
+  injectable process sitting next to an exploit. Nothing in the app needs it and no code path reaches for a
+  hidden API, so removing it changes no behaviour. Debug builds are still debuggable, because the debug
+  build type does that on its own.
 
 ## 1.15
 
