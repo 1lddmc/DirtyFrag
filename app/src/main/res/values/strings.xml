@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- layout -->
+    <string name="update_word">Update</string>
+    <string name="odin_word">Odin</string>
+    <string name="su_manager">SU Manager</string>
+    <string name="su_manager_not_selected">Not selected - required</string>
+    <string name="autorun">Autorun</string>
+    <string name="autorun_desc">Runs the exploit after boot</string>
+    <string name="auto_reboot">Auto reboot</string>
+    <string name="auto_reboot_desc">Soft reboots after root</string>
+    <string name="ksu_modules">KernelSU Modules</string>
+    <string name="modules_enabled_desc">Enabled - active at next reboot</string>
+    <string name="show_advanced_log">Show advanced log</string>
+    <string name="advanced_log_desc">Shows full scrollable log</string>
+    <string name="run_exploit">Run exploit</string>
+    <string name="manager">Manager</string>
+    <!-- contentDescription -->
+    <string name="cd_menu">Menu</string>
+    <string name="cd_update_pill">Update available, open the release page</string>
+    <string name="cd_odin_pill">Odin download mode availability</string>
+    <string name="cd_select">Select</string>
+    <string name="cd_open_su_manager">Open SU manager</string>
+    <string name="cd_open">Open</string>
+    <string name="cd_save_log">Save log to Downloads</string>
+    <string name="cd_hide_card">Hide card</string>
+    <!-- menu -->
+    <string name="menu_github">Github Page</string>
+    <string name="menu_expert">Expert mode</string>
+    <string name="menu_remove_ksu">Remove KSU/KSUD</string>
+    <!-- MainActivity -->
+    <string name="modules_enabled_reroot">Enabled - Active at next reroot</string>
+    <string name="modules_disabled_reroot">Disabled - No Modules on reroot</string>
+    <string name="menu_expert_mode">Expert Mode</string>
+    <string name="menu_reset_layout">Reset layout</string>
+    <string name="toast_layout_reset">Card layout reset</string>
+    <string name="toast_modules_enabled">KSU modules enabled - applies at next root</string>
+    <string name="toast_modules_disabled">KSU modules disabled - applies at next root</string>
+    <string name="no_app_with_libksud">No app with libksud.so found</string>
+    <string name="autorun_expert">Autorun (Expert)</string>
+    <string name="auto_reboot_expert">Auto reboot (Expert)</string>
+    <string name="are_you_sure">Are you sure</string>
+    <string name="running">Running</string>
+    <string name="rooted">Rooted</string>
+    <string name="toast_no_su_manager">No SU manager selected</string>
+    <string name="toast_cannot_launch">%1$s cannot be launched</string>
+    <string name="toast_no_browser">No browser found</string>
+    <string name="odin_lockscreen">Lockscreen</string>
+    <string name="odin_maintenance">Maintenance Mode</string>
+    <string name="odin_device">Device</string>
+    <!-- TwoStepProgressView -->
+    <string name="progress_waiting">Waiting</string>
+    <string name="progress_verification">Verification</string>
+    <string name="progress_verified">Verified</string>
+    <string name="progress_failure">Failure</string>
+    <string name="progress_reboot">Reboot</string>
+    <!-- D2Status -->
+    <string name="d2_yes">Yes</string>
+    <string name="d2_no">No</string>
+    <string name="d2_on">On</string>
+    <string name="d2_off">Off</string>
+    <string name="d2_supported">Supported</string>
+    <string name="d2_unsupported">Unsupported</string>
+</resources>
